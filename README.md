@@ -299,4 +299,4 @@ For questions and support:
 
 Built with ❤️ on Aptos Blockchain
 
-![alt text](Screenshot From 2025-08-14 12-38-15.png)
+![alt text](image.png)
