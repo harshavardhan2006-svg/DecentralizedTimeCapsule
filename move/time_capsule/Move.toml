@@ -1,0 +1,10 @@
+[package]
+name = "time_capsule"
+version = "0.0.1"
+
+[addresses]
+time_capsule = "0x40584014251cc83138a7bfb2b83c13ed3b227bff6d481238f586216b69cec2f6"
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "main" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-stdlib", rev = "main" }
