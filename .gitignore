@@ -1,0 +1,31 @@
+# Node/JS
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# React/Vite builds
+frontend/build/
+frontend/dist/
+*.cache
+*.log
+
+# Aptos Move builds & junk
+move/build/
+**/build/
+*.mv
+**/.aptos/
+.aptos/
+
+# Env files
+.env
+**/.env
+**/*.env.local
+**/.env.*.local
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
