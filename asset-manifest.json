@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "/DecentralizedTimeCapsule/static/css/main.4cb02b79.css",
-    "main.js": "/DecentralizedTimeCapsule/static/js/main.2cd50537.js",
+    "main.js": "/DecentralizedTimeCapsule/static/js/main.79d304c6.js",
     "service-worker.js": "/DecentralizedTimeCapsule/service-worker.js",
     "index.html": "/DecentralizedTimeCapsule/index.html",
     "main.4cb02b79.css.map": "/DecentralizedTimeCapsule/static/css/main.4cb02b79.css.map",
-    "main.2cd50537.js.map": "/DecentralizedTimeCapsule/static/js/main.2cd50537.js.map"
+    "main.79d304c6.js.map": "/DecentralizedTimeCapsule/static/js/main.79d304c6.js.map"
   },
   "entrypoints": [
     "static/css/main.4cb02b79.css",
-    "static/js/main.2cd50537.js"
+    "static/js/main.79d304c6.js"
   ]
 }
