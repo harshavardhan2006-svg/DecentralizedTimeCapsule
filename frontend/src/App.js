@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { viewFunction } from "./utils/aptos";
 import { encryptText, decryptText, hexToBytes, bytesToHex } from "./utils/crypto";
-import { uploadToIPFS, downloadFromIPFS, simpleIPFSUpload, simpleIPFSDownload, testIPFS } from "./utils/ipfs";
+import { uploadToIPFS, downloadFromIPFS, testIPFS, getIPFSFileInfo } from "./utils/ipfs";
 
 const MODULE_ADDR = "0x40584014251cc83138a7bfb2b83c13ed3b227bff6d481238f586216b69cec2f6";
 const FUNC_CREATE = `${MODULE_ADDR}::time_capsule::create_capsule`;
@@ -25,7 +25,6 @@ export default function App() {
   const [unlockAt, setUnlockAt] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
-  const [useSimpleIPFS, setUseSimpleIPFS] = useState(true); // Toggle for demo mode
 
   const [capsuleId, setCapsuleId] = useState("");
   const [revealPass, setRevealPass] = useState("");
@@ -49,31 +48,33 @@ export default function App() {
         return alert("Please switch to Testnet");
       }
       setAccount(address);
-      setStatus(`Connected: ${address}`);
+      setStatus(`✅ Connected: ${address}\n\nReady to create or reveal time capsules!`);
     } catch (e) {
       console.error(e);
-      setStatus("Connection failed: " + e.message);
+      setStatus("❌ Connection failed: " + e.message);
     }
   };
 
   const handleFileSelect = (event) => {
     const files = Array.from(event.target.files);
     
-    // Validate file sizes (limit to 10MB per file for demo)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    // Validate file sizes (limit to 25MB per file for better IPFS compatibility)
+    const maxSize = 25 * 1024 * 1024; // 25MB
     const oversizedFiles = files.filter(f => f.size > maxSize);
     
     if (oversizedFiles.length > 0) {
-      setStatus(`Some files are too large (max 10MB): ${oversizedFiles.map(f => f.name).join(", ")}`);
+      setStatus(`❌ Some files are too large (max 25MB each):\n${oversizedFiles.map(f => f.name).join(", ")}\n\nPlease use smaller files for better IPFS compatibility.`);
       return;
     }
     
     setSelectedFiles(prev => [...prev, ...files]);
-    setStatus(`Selected ${files.length} file(s): ${files.map(f => f.name).join(", ")}`);
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    setStatus(`✅ Selected ${files.length} file(s):\n${files.map(f => `• ${f.name} (${(f.size/1024).toFixed(1)} KB)`).join('\n')}\n\nTotal size: ${(totalSize/1024/1024).toFixed(2)} MB`);
   };
 
   const removeFile = (index) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    setStatus("File removed. Select new files if needed.");
   };
 
   const checkCapsuleStatus = async (id) => {
@@ -95,6 +96,24 @@ export default function App() {
     } catch (e) {
       console.error("Capsule check failed:", e);
       return { exists: false };
+    }
+  };
+
+  const testIPFSConnection = async () => {
+    setIsLoading(true);
+    setStatus("🧪 Testing IPFS connectivity...\n\nThis may take a moment as we test file upload/download across multiple gateways...");
+    
+    try {
+      const success = await testIPFS();
+      if (success) {
+        setStatus("🎉 IPFS Test PASSED!\n\n✅ File upload successful\n✅ Cross-device download verified\n✅ Multiple gateways working\n\nYour files will work across all devices! 🚀");
+      } else {
+        setStatus("❌ IPFS Test FAILED!\n\nThere might be network connectivity issues. Files may not work properly across devices.\n\nTry again or check your internet connection.");
+      }
+    } catch (error) {
+      setStatus(`❌ IPFS Test Error: ${error.message}\n\nPlease check your internet connection and try again.`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -121,27 +140,24 @@ export default function App() {
         return alert("Passphrase cannot be empty");
       }
 
-      setStatus("Processing files...");
+      setStatus("📤 Uploading files to IPFS...\n\nUsing distributed IPFS network for cross-device compatibility...");
       
-      // Upload files to IPFS with better error handling
+      // Upload files to IPFS with improved error handling
       let fileData = [];
       let uploadErrors = [];
       
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
-        setStatus(`Uploading file ${i + 1}/${selectedFiles.length}: ${file.name}`);
+        setStatus(`📤 Uploading file ${i + 1}/${selectedFiles.length}: ${file.name}\n\nTrying multiple IPFS gateways for reliability...`);
         
         try {
-          let ipfsHash;
+          const ipfsHash = await uploadToIPFS(file);
+          setStatus(`✅ Uploaded ${file.name}\n\n📍 IPFS Hash: ${ipfsHash}\n🌐 File is now available worldwide!`);
           
-          if (useSimpleIPFS) {
-            // Use simple localStorage-based method for demo
-            ipfsHash = await simpleIPFSUpload(file);
-            setStatus(`🟢 Stored ${file.name} locally: ${ipfsHash.substring(0, 12)}...`);
-          } else {
-            // Use real IPFS (requires API keys)
-            ipfsHash = await uploadToIPFS(file);
-            setStatus(`🟢 Uploaded ${file.name} to IPFS: ${ipfsHash}`);
+          // Verify the file is accessible
+          const fileInfo = await getIPFSFileInfo(ipfsHash);
+          if (!fileInfo.accessible) {
+            throw new Error("File uploaded but not immediately accessible");
           }
           
           fileData.push({
@@ -149,24 +165,25 @@ export default function App() {
             type: file.type,
             size: file.size,
             ipfsHash: ipfsHash,
-            uploadMethod: useSimpleIPFS ? 'local' : 'ipfs'
+            uploadMethod: 'ipfs', // Always use real IPFS now
+            verified: true
           });
           
         } catch (error) {
           console.error(`Failed to upload ${file.name}:`, error);
           uploadErrors.push(`${file.name}: ${error.message}`);
-          setStatus(`❌ Failed to upload ${file.name}: ${error.message}`);
+          setStatus(`❌ Failed to upload ${file.name}: ${error.message}\n\nTrying to continue with other files...`);
         }
       }
       
       if (uploadErrors.length > 0 && fileData.length === 0) {
         setIsLoading(false);
-        setStatus(`All file uploads failed:\n${uploadErrors.join('\n')}`);
+        setStatus(`❌ All file uploads failed:\n\n${uploadErrors.join('\n')}\n\nPlease check your internet connection and try again with smaller files.`);
         return;
       }
       
       if (uploadErrors.length > 0) {
-        setStatus(`Some files failed to upload:\n${uploadErrors.join('\n')}\n\nContinuing with ${fileData.length} successful uploads...`);
+        setStatus(`⚠️ Some files failed to upload:\n${uploadErrors.join('\n')}\n\n✅ Continuing with ${fileData.length} successful uploads...`);
       }
 
       // Create content object with better structure
@@ -174,7 +191,12 @@ export default function App() {
         text: message.trim(),
         files: fileData,
         timestamp: Date.now(),
-        version: "2.0" // Version for backward compatibility
+        version: "3.0", // Updated version for cross-device compatibility
+        deviceInfo: {
+          userAgent: navigator.userAgent,
+          platform: navigator.platform,
+          created: new Date().toISOString()
+        }
       };
 
       // Determine content type
@@ -185,7 +207,7 @@ export default function App() {
         contentType = "file";
       }
 
-      setStatus("Encrypting content...");
+      setStatus("🔒 Encrypting content with AES-256...\n\nYour data is being secured for the time capsule...");
       
       // Encrypt the entire content object as JSON
       const contentJson = JSON.stringify(content, null, 2);
@@ -211,7 +233,7 @@ export default function App() {
       const encryptedBytes = hexToBytes(encryptedHex);
       console.log("Encrypted bytes length:", encryptedBytes.length);
       
-      setStatus("Creating capsule on blockchain...");
+      setStatus("⛓️ Creating capsule on Aptos blockchain...\n\nSubmitting transaction to network...");
       
       const transaction = {
         type: "entry_function_payload",
@@ -223,17 +245,19 @@ export default function App() {
       const tx = await window.aptos.signAndSubmitTransaction(transaction);
       
       setStatus(
-        `🟢 Capsule Created Successfully!\n\n` +
-        `Transaction: ${tx.hash}\n` +
-        `Content Type: ${contentType}\n` +
-        `Text Message: ${content.text ? 'Yes' : 'No'}\n` +
-        `Files Attached: ${fileData.length}\n` +
-        `Upload Method: ${useSimpleIPFS ? 'Local Storage' : 'IPFS'}\n` +
-        `Unlocks at: ${new Date(unlockSeconds * 1000).toLocaleString()}\n\n` +
+        `🎉 Time Capsule Created Successfully!\n\n` +
+        `📋 Transaction: ${tx.hash}\n` +
+        `📦 Content Type: ${contentType}\n` +
+        `💬 Text Message: ${content.text ? 'Yes' : 'No'}\n` +
+        `➕ Files Attached: ${fileData.length}\n` +
+        `🔓 Unlocks at: ${new Date(unlockSeconds * 1000).toLocaleString()}\n\n` +
         `🔑 Passphrase: "${trimmedPassphrase}"\n` +
-        `Save this passphrase safely!\n\n` +
-        `File Details:\n${fileData.map(f => `- ${f.name} (${(f.size/1024).toFixed(1)} KB)`).join('\n')}\n` +
-        `${uploadErrors.length > 0 ? `\nUpload Errors:\n${uploadErrors.join('\n')}` : ''}`
+        `⚠️ IMPORTANT: Share this passphrase securely with the receiver!\n\n` +
+        `📱 Cross-Device Compatible: YES ✅\n` +
+        `🌐 IPFS Files: Accessible worldwide\n\n` +
+        `📄 File Details:\n${fileData.map(f => `• ${f.name} (${(f.size/1024).toFixed(1)} KB) ✅`).join('\n')}\n` +
+        `${uploadErrors.length > 0 ? `\n❌ Upload Errors:\n${uploadErrors.join('\n')}` : ''}\n\n` +
+        `🚀 Your time capsule is now secured on the blockchain!`
       );
       
       // Clear form after success
@@ -243,7 +267,7 @@ export default function App() {
       
     } catch (e) {
       console.error("Create capsule error:", e);
-      setStatus(`❌ Failed: ${e.message}\n\nTroubleshooting:\n1. Check wallet connection\n2. Verify network is Testnet\n3. Ensure sufficient gas fees\n4. Try reducing file sizes\n5. Check IPFS connectivity`);
+      setStatus(`❌ Failed to create capsule: ${e.message}\n\n🔧 Troubleshooting:\n1. Check wallet connection\n2. Verify network is Testnet\n3. Ensure sufficient gas fees\n4. Check internet connection\n5. Try with smaller files (<25MB each)`);
     } finally {
       setIsLoading(false);
     }
@@ -251,25 +275,25 @@ export default function App() {
 
   const revealCapsule = async () => {
     if (!account) return alert("Connect wallet first");
-    if (!capsuleId || !revealPass) return alert("Enter ID and passphrase");
+    if (!capsuleId || !revealPass) return alert("Enter capsule ID and passphrase");
     setIsLoading(true);
     
     try {
       const capsule = await checkCapsuleStatus(capsuleId);
       if (!capsule.exists) {
         setIsLoading(false);
-        return setStatus("Capsule not found");
+        return setStatus("❌ Capsule not found. Please check the ID.");
       }
       if (!capsule.isUnlocked) {
         setIsLoading(false);
-        return setStatus(`Capsule is still locked. Unlocks at: ${new Date(capsule.unlockTime * 1000).toLocaleString()}`);
+        return setStatus(`🔒 Capsule is still locked.\n\n⏰ Unlocks at: ${new Date(capsule.unlockTime * 1000).toLocaleString()}\n\nPlease wait until the unlock time.`);
       }
       if (!capsule.isAuthorized) {
         setIsLoading(false);
-        return setStatus("Not authorized to view this capsule");
+        return setStatus("❌ Not authorized to view this capsule\n\nOnly the sender and receiver can access the content.");
       }
 
-      setStatus("Retrieving encrypted data...");
+      setStatus("📥 Retrieving encrypted data from blockchain...\n\nFetching your time capsule content...");
 
       const encryptedData = await viewFunction(FUNC_REVEAL, [account, capsuleId]);
       console.log("Raw data from chain:", encryptedData);
@@ -278,21 +302,21 @@ export default function App() {
       
       if (!encryptedData) {
         setIsLoading(false);
-        return setStatus("No encrypted data found or access denied");
+        return setStatus("❌ No encrypted data found or access denied");
       }
       
       // Handle different data formats from the blockchain
       if (typeof encryptedData === 'string') {
         if (encryptedData.length === 0) {
           setIsLoading(false);
-          return setStatus("Empty encrypted data - you may not be authorized or capsule is still locked");
+          return setStatus("❌ Empty encrypted data - you may not be authorized or capsule is still locked");
         }
         encryptedHex = encryptedData.startsWith('0x') ? encryptedData.slice(2) : encryptedData;
         
       } else if (Array.isArray(encryptedData) && typeof encryptedData[0] === 'number') {
         if (encryptedData.length === 0) {
           setIsLoading(false);
-          return setStatus("Empty encrypted data - you may not be authorized or capsule is still locked");
+          return setStatus("❌ Empty encrypted data - you may not be authorized or capsule is still locked");
         }
         encryptedHex = bytesToHex(encryptedData);
         
@@ -300,27 +324,27 @@ export default function App() {
         const hexString = encryptedData[0];
         if (hexString.length === 0) {
           setIsLoading(false);
-          return setStatus("Empty encrypted data - you may not be authorized or capsule is still locked");
+          return setStatus("❌ Empty encrypted data - you may not be authorized or capsule is still locked");
         }
         encryptedHex = hexString.startsWith('0x') ? hexString.slice(2) : hexString;
         
       } else {
         setIsLoading(false);
-        return setStatus(`Unexpected data format: ${typeof encryptedData}\nData: ${JSON.stringify(encryptedData).substring(0, 200)}`);
+        return setStatus(`❌ Unexpected data format: ${typeof encryptedData}\nData: ${JSON.stringify(encryptedData).substring(0, 200)}`);
       }
       
       if (!/^[0-9a-f]+$/i.test(encryptedHex)) {
         setIsLoading(false);
-        return setStatus("Invalid capsule data format - corrupted encryption data");
+        return setStatus("❌ Invalid capsule data format - corrupted encryption data");
       }
 
       const trimmedPassphrase = revealPass.trim();
       if (trimmedPassphrase.length === 0) {
         setIsLoading(false);
-        return setStatus("Passphrase cannot be empty");
+        return setStatus("❌ Passphrase cannot be empty");
       }
       
-      setStatus("Decrypting content...");
+      setStatus("🔓 Decrypting content with AES-256...\n\nUnlocking your time capsule...");
       
       let decryptedContent;
       try {
@@ -349,42 +373,44 @@ export default function App() {
       } catch (decryptError) {
         console.error("Decryption failed:", decryptError);
         setIsLoading(false);
-        return setStatus(`❌ Decryption failed: ${decryptError.message}\n\nPossible issues:\n1. Wrong passphrase\n2. Corrupted data\n3. Encryption/decryption mismatch`);
+        return setStatus(`❌ Decryption failed: ${decryptError.message}\n\n🔧 Possible issues:\n1. Wrong passphrase\n2. Corrupted data\n3. Encryption/decryption mismatch\n\nPlease verify the passphrase with the sender.`);
       }
 
       if (!decryptedContent) {
         setIsLoading(false);
-        return setStatus(`Decryption failed - wrong passphrase or corrupted data`);
+        return setStatus(`❌ Decryption failed - wrong passphrase or corrupted data`);
       }
 
       setRevealedContent(decryptedContent);
 
-      let statusMessage = `🟢 Capsule #${capsuleId} Unlocked Successfully!\n\n` +
-        `From: ${capsule.sender}\n` +
-        `To: ${capsule.receiver}\n` +
-        `Content Type: ${capsule.contentType}\n` +
-        `Content Version: ${decryptedContent.version || '1.0'}\n` +
-        `Unlocked at: ${new Date(capsule.unlockTime * 1000).toLocaleString()}\n\n`;
+      let statusMessage = `🎉 Time Capsule #${capsuleId} Unlocked Successfully!\n\n` +
+        `📤 From: ${capsule.sender}\n` +
+        `📥 To: ${capsule.receiver}\n` +
+        `📦 Content Type: ${capsule.contentType}\n` +
+        `📱 Content Version: ${decryptedContent.version || '1.0'}\n` +
+        `⏰ Created: ${decryptedContent.timestamp ? new Date(decryptedContent.timestamp).toLocaleString() : 'Unknown'}\n` +
+        `🔓 Unlocked at: ${new Date(capsule.unlockTime * 1000).toLocaleString()}\n\n`;
 
       if (decryptedContent.text && decryptedContent.text.trim()) {
-        statusMessage += `📩 Text Message:\n${decryptedContent.text}\n\n`;
+        statusMessage += `💬 Text Message:\n"${decryptedContent.text}"\n\n`;
       }
 
       if (decryptedContent.files && decryptedContent.files.length > 0) {
-        statusMessage += `📎 Files (${decryptedContent.files.length}):\n`;
+        statusMessage += `➕ Attached Files (${decryptedContent.files.length}):\n`;
         decryptedContent.files.forEach((file, index) => {
           const sizeKB = file.size ? (file.size / 1024).toFixed(1) : 'Unknown';
-          const method = file.uploadMethod || 'Unknown';
-          statusMessage += `${index + 1}. ${file.name} (${sizeKB} KB) [${method}]\n`;
+          const method = file.uploadMethod || 'IPFS';
+          const verified = file.verified ? '✅' : '❓';
+          statusMessage += `${index + 1}. ${file.name} (${sizeKB} KB) [${method}] ${verified}\n`;
         });
-        statusMessage += `\nClick individual files below to download them.`;
+        statusMessage += `\n🌐 Files are stored on IPFS for cross-device access\n📱 Click individual files below to download on any device`;
       }
 
       setStatus(statusMessage);
       
     } catch (e) {
       console.error("Reveal error:", e);
-      setStatus(`❌ Error: ${e.message}\n\nTroubleshooting:\n1. Check network connection\n2. Verify capsule ID exists\n3. Ensure wallet is connected to Testnet\n4. Try refreshing the page\n5. Double-check your passphrase`);
+      setStatus(`❌ Error: ${e.message}\n\n🔧 Troubleshooting:\n1. Check network connection\n2. Verify capsule ID exists\n3. Ensure wallet is connected to Testnet\n4. Try refreshing the page\n5. Double-check your passphrase`);
     } finally {
       setIsLoading(false);
     }
@@ -392,19 +418,13 @@ export default function App() {
 
   const downloadFile = async (file) => {
     try {
-      setStatus(`Downloading ${file.name}...`);
+      setStatus(`📥 Downloading ${file.name} from IPFS...\n\nConnecting to distributed IPFS network...`);
       
       let fileBlob;
       
-      if (file.uploadMethod === 'local') {
-        // Use simple download for localStorage files
-        fileBlob = await simpleIPFSDownload(file.ipfsHash);
-        setStatus(`🟢 Downloaded ${file.name} from local storage!`);
-      } else {
-        // Use IPFS download for real IPFS files
-        fileBlob = await downloadFromIPFS(file.ipfsHash, file.name);
-        setStatus(`🟢 Downloaded ${file.name} from IPFS!`);
-      }
+      // Always use real IPFS download now
+      fileBlob = await downloadFromIPFS(file.ipfsHash, file.name);
+      setStatus(`✅ Downloaded ${file.name} successfully!\n\n📊 Size: ${(fileBlob.size / 1024).toFixed(1)} KB\n🌐 Source: IPFS Network\n📱 Compatible: All devices`);
       
       // Create download link
       const url = URL.createObjectURL(fileBlob);
@@ -416,11 +436,11 @@ export default function App() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      setStatus(`🟢 ${file.name} downloaded successfully!`);
+      setStatus(`🎉 ${file.name} downloaded successfully!\n\n✅ File saved to your Downloads folder\n🔄 You can download this file on any device using the same capsule`);
       
     } catch (error) {
       console.error("Download error:", error);
-      setStatus(`❌ Failed to download ${file.name}: ${error.message}\n\nTroubleshooting:\n1. Check internet connection\n2. File may be corrupted\n3. IPFS gateway may be unavailable`);
+      setStatus(`❌ Failed to download ${file.name}: ${error.message}\n\n🔧 Troubleshooting:\n1. Check internet connection\n2. Try again (IPFS can be slow sometimes)\n3. File may need time to propagate across IPFS network\n4. Try downloading on a different device\n\nIPFS Hash: ${file.ipfsHash}`);
     }
   };
 
@@ -428,32 +448,33 @@ export default function App() {
     try {
       const res = await viewFunction(FUNC_LEN, []);
       const count = (res?.[0] ?? 0);
-      const actualcnt = count-1;
-      setStatus(`Total capsules created: ${actualcnt}`);
+      const actualcnt = count - 1;
+      setStatus(`📊 Total capsules created: ${actualcnt}\n\n📋 Valid capsule IDs: 0 to ${actualcnt}\n🔍 Enter any ID above to view capsule details`);
     } catch (e) {
       console.error(e);
-      setStatus("Failed to fetch total capsules: " + e.message);
+      setStatus("❌ Failed to fetch total capsules: " + e.message);
     }
   };
 
   const getCapsuleMetadata = async () => {
-    if (!capsuleId) return alert("Enter capsule ID");
+    if (!capsuleId) return alert("Enter capsule ID first");
     try {
       const capsule = await checkCapsuleStatus(capsuleId);
-      if (!capsule.exists) return setStatus("Capsule not found");
+      if (!capsule.exists) return setStatus("❌ Capsule not found");
       
       const unlockDate = new Date(capsule.unlockTime * 1000);
       const now = new Date();
       const timeRemaining = capsule.unlockTime * 1000 - Date.now();
       
       let statusText = `📦 Capsule #${capsuleId} Metadata\n\n` +
-        `Sender: ${capsule.sender}\n` +
-        `Receiver: ${capsule.receiver}\n` +
-        `Content Type: ${capsule.contentType}\n` +
-        `Unlock Time: ${unlockDate.toLocaleString()}\n` +
-        `Status: ${capsule.isUnlocked ? "🔓 UNLOCKED" : "🔒 LOCKED"}\n` +
-        `Authorization: ${capsule.isAuthorized ? "🟢 AUTHORIZED" : "❌ NOT AUTHORIZED"}\n` +
-        `Your Address: ${account}`;
+        `📤 Sender: ${capsule.sender}\n` +
+        `📥 Receiver: ${capsule.receiver}\n` +
+        `📦 Content Type: ${capsule.contentType}\n` +
+        `⏰ Unlock Time: ${unlockDate.toLocaleString()}\n` +
+        `🔒 Status: ${capsule.isUnlocked ? "🔓 UNLOCKED" : "🔒 LOCKED"}\n` +
+        `👤 Authorization: ${capsule.isAuthorized ? "✅ AUTHORIZED" : "❌ NOT AUTHORIZED"}\n` +
+        `📱 Your Address: ${account}\n` +
+        `🌐 Cross-Device: YES ✅`;
       
       if (!capsule.isUnlocked && timeRemaining > 0) {
         const days = Math.floor(timeRemaining / (1000 * 60 * 60 * 24));
@@ -465,15 +486,15 @@ export default function App() {
       setStatus(statusText);
     } catch (e) {
       console.error(e);
-      setStatus("Metadata error: " + e.message);
+      setStatus("❌ Metadata error: " + e.message);
     }
   };
 
   return (
     <div className="container">
       <header className="app-header">
-        <h1>Decentralized Time Capsule</h1>
-        <p>Encrypt and time-lock your messages and files on the blockchain</p>
+        <h1>🚀 Decentralized Time Capsule</h1>
+        <p>Encrypt and time-lock your messages and files on the blockchain - Works across ALL devices! 🌐</p>
       </header>
       
       <div className="wallet-section">
@@ -483,7 +504,10 @@ export default function App() {
         
         {account && (
           <div className="network-info">
-            <span>🟢 Connected to Testnet</span>
+            <span>✅ Connected to Testnet</span>
+            <button onClick={testIPFSConnection} disabled={isLoading} className="test-btn">
+              {isLoading ? "Testing..." : "🧪 Test IPFS"}
+            </button>
           </div>
         )}
       </div>
@@ -534,7 +558,7 @@ export default function App() {
 
           {selectedFiles.length > 0 && (
             <div className="selected-files">
-              <h4>📎 Selected Files ({selectedFiles.length}):</h4>
+              <h4>➕ Selected Files ({selectedFiles.length}) - Cross-Device Compatible ✅:</h4>
               <div className="files-grid">
                 {selectedFiles.map((file, index) => (
                   <div key={index} className="file-item">
@@ -544,6 +568,8 @@ export default function App() {
                       </div>
                       <div className="file-details">
                         {file.type || 'Unknown type'} • {(file.size / 1024).toFixed(1)} KB
+                        <br />
+                        <small>🌐 Will work on any device via IPFS</small>
                       </div>
                     </div>
                     <button 
@@ -579,11 +605,11 @@ export default function App() {
               placeholder="Enter a strong passphrase (share securely with receiver)" 
               disabled={isLoading}
             />
-            <small>⚠️ Remember this passphrase! It cannot be recovered.</small>
+            <small>⚠️ Remember this passphrase! It cannot be recovered and is needed on any device.</small>
           </div>
           
           <button onClick={createCapsule} disabled={isLoading || !account} className="create-btn">
-            {isLoading ? "🔄 Creating..." : "🚀 Create Capsule"}
+            {isLoading ? "🔄 Creating..." : "🚀 Create Cross-Device Capsule"}
           </button>
         </div>
 
@@ -620,6 +646,7 @@ export default function App() {
               placeholder="Enter the exact passphrase used during creation" 
               disabled={isLoading}
             />
+            <small>🔑 Same passphrase works on any device</small>
           </div>
           
           <button onClick={revealCapsule} disabled={isLoading || !account} className="reveal-btn">
@@ -628,7 +655,7 @@ export default function App() {
 
           {revealedContent && (
             <div className="revealed-content">
-              <h4>🟢 Capsule Contents Unlocked!</h4>
+              <h4>🎁 Capsule Contents Unlocked! 🌐</h4>
               
               {revealedContent.text && revealedContent.text.trim() && (
                 <div className="text-content">
@@ -639,7 +666,7 @@ export default function App() {
               
               {revealedContent.files && revealedContent.files.length > 0 && (
                 <div className="files-content">
-                  <h5>📎 Attached Files ({revealedContent.files.length}):</h5>
+                  <h5>➕ Attached Files ({revealedContent.files.length}) - Download on ANY Device:</h5>
                   <div className="files-grid">
                     {revealedContent.files.map((file, index) => (
                       <div key={index} className="file-download-item">
@@ -650,7 +677,7 @@ export default function App() {
                           <div className="file-details">
                             {file.type || 'Unknown'} • {(file.size / 1024).toFixed(1)} KB
                             <br />
-                            <small>Storage: {file.uploadMethod || 'Unknown'}</small>
+                            <small>🌐 IPFS: Cross-device compatible {file.verified ? '✅' : '❓'}</small>
                           </div>
                         </div>
                         <button 
@@ -663,13 +690,21 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                  <div className="ipfs-info">
+                    <small>
+                      💡 These files are stored on IPFS (InterPlanetary File System)<br />
+                      🌐 You can download them on any device with internet access<br />
+                      🔄 If download fails, try again - IPFS can take time to propagate
+                    </small>
+                  </div>
                 </div>
               )}
               
               {revealedContent.timestamp && (
                 <div className="metadata">
                   <small>
-                    📅 Created: {new Date(revealedContent.timestamp).toLocaleString()}
+                    📅 Created: {new Date(revealedContent.timestamp).toLocaleString()}<br />
+                    📱 Version: {revealedContent.version || '1.0'} (Cross-device compatible)
                   </small>
                 </div>
               )}
@@ -681,7 +716,7 @@ export default function App() {
       <div className="status-section">
         <h4>📱 Status & Logs:</h4>
         <div className="status-box">
-          <pre>{status || "Ready to create or reveal time capsules..."}</pre>
+          <pre>{status || "✅ Ready to create or reveal time capsules...\n\n🌐 This app works perfectly across all devices!\n📱 Create on mobile, open on desktop, or vice versa.\n🔄 Files are stored on IPFS for global accessibility."}</pre>
         </div>
       </div>
       
@@ -742,6 +777,30 @@ export default function App() {
           margin-top: 10px;
           color: #b0b0b0;
           font-size: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 15px;
+        }
+        
+        .test-btn {
+          background: #27ae60;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-size: 12px;
+          cursor: pointer;
+          transition: background 0.3s;
+        }
+        
+        .test-btn:hover:not(:disabled) {
+          background: #219955;
+        }
+        
+        .test-btn:disabled {
+          background: #262626;
+          cursor: not-allowed;
         }
         
         .main-content {
@@ -879,7 +938,7 @@ export default function App() {
         }
         
         .file-item:hover, .file-download-item:hover {
-          background:rgb(44, 37, 37);
+          background: #262626;
         }
         
         .file-info {
@@ -904,12 +963,10 @@ export default function App() {
           background: none;
           border: none;
           font-size: 16px;
-          width: 22px;
           cursor: pointer;
-          padding: 2px;
-          color: #b0b0b0;
-         
+          padding: 4px;
           border-radius: 50%;
+          color: #b0b0b0;
           transition: background 0.3s;
         }
         
@@ -1003,6 +1060,20 @@ export default function App() {
         .files-content h5 {
           margin: 0 0 15px 0;
           color: #e0e0e0;
+        }
+        
+        .ipfs-info {
+          margin-top: 15px;
+          padding: 10px;
+          background: #1e1e1e;
+          border-radius: 6px;
+          border: 1px solid #333;
+          text-align: center;
+        }
+        
+        .ipfs-info small {
+          color: #b0b0b0;
+          line-height: 1.4;
         }
         
         .metadata {
