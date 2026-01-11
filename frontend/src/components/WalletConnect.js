@@ -2,75 +2,100 @@ import React, { useState, useEffect } from "react";
 
 export default function WalletConnect({ setAccount }) {
   const [isConnected, setIsConnected] = useState(false);
-  const [walletAdapter, setWalletAdapter] = useState(null);
+  const [wallet, setWallet] = useState(null);
 
   useEffect(() => {
-    // Initialize wallet adapter
-    const initWallet = async () => {
-      if (window.aptos) {
+    const detectWallet = async () => {
+      // Wait for wallet to be injected
+      const checkWallet = () => {
+        if (window.petra) {
+          return window.petra;
+        }
+        if (window.aptos) {
+          return window.aptos;
+        }
+        return null;
+      };
+
+      let detectedWallet = checkWallet();
+      
+      // If not immediately available, wait a bit
+      if (!detectedWallet) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        detectedWallet = checkWallet();
+      }
+
+      if (detectedWallet) {
+        setWallet(detectedWallet);
+        
         try {
-          setWalletAdapter(window.aptos);
-          
-          // Check if already connected
-          const isWalletConnected = await window.aptos.isConnected();
-          if (isWalletConnected) {
-            const account = await window.aptos.account();
-            setAccount(account.address);
-            setIsConnected(true);
+          // Check if already connected using the standard method
+          const isConnectedNow = await detectedWallet.isConnected?.();
+          if (isConnectedNow) {
+            const accountInfo = await detectedWallet.account?.();
+            if (accountInfo?.address) {
+              setAccount(accountInfo.address);
+              setIsConnected(true);
+            }
           }
         } catch (err) {
-          console.error("Wallet initialization error:", err);
+          console.log("Not connected yet");
+        }
+
+        // Listen for account changes
+        if (detectedWallet.onAccountChange) {
+          detectedWallet.onAccountChange((newAccount) => {
+            if (newAccount) {
+              setAccount(newAccount.address);
+              setIsConnected(true);
+            } else {
+              setAccount(null);
+              setIsConnected(false);
+            }
+          });
+        }
+
+        // Listen for disconnect
+        if (detectedWallet.onDisconnect) {
+          detectedWallet.onDisconnect(() => {
+            setAccount(null);
+            setIsConnected(false);
+          });
         }
       }
     };
 
-    initWallet();
-
-    // Listen for account changes
-    const handleAccountChange = (newAccount) => {
-      if (newAccount) {
-        setAccount(newAccount.address);
-        setIsConnected(true);
-      } else {
-        setAccount(null);
-        setIsConnected(false);
-      }
-    };
-
-    if (window.aptos) {
-      window.aptos.onAccountChange(handleAccountChange);
-    }
-
-    return () => {
-      // Cleanup listener if needed
-      if (window.aptos && window.aptos.onAccountChange) {
-        // Note: Petra doesn't have a removeListener method, but we clean up on unmount
-      }
-    };
+    detectWallet();
   }, [setAccount]);
 
   const connectWallet = async () => {
-    if (!walletAdapter) {
-      console.error("Wallet adapter not initialized");
+    if (!wallet) {
+      alert("Please install Petra Wallet first");
       return;
     }
 
     try {
-      const response = await walletAdapter.connect();
-      if (response) {
+      // Use the standard connect method
+      const response = await wallet.connect();
+      
+      if (response?.address) {
         setAccount(response.address);
+        setIsConnected(true);
+      } else if (response?.account?.address) {
+        setAccount(response.account.address);
         setIsConnected(true);
       }
     } catch (err) {
       console.error("Connection error:", err);
+      alert("Failed to connect wallet. Please try again.");
     }
   };
 
   const disconnectWallet = async () => {
-    if (!walletAdapter) return;
+    if (!wallet) return;
 
     try {
-      await walletAdapter.disconnect();
+      await wallet.disconnect?.();
       setAccount(null);
       setIsConnected(false);
     } catch (err) {
@@ -78,26 +103,37 @@ export default function WalletConnect({ setAccount }) {
     }
   };
 
-  if (!window.aptos) {
+  if (!wallet && typeof window !== 'undefined') {
     return (
       <div style={{
         padding: "16px",
-        backgroundColor: "#f3f4f6",
+        backgroundColor: "#fef3c7",
+        border: "2px solid #f59e0b",
         borderRadius: "8px",
         textAlign: "center"
       }}>
-        <p style={{ marginBottom: "8px" }}>Petra Wallet not detected</p>
+        <p style={{ marginBottom: "12px", fontWeight: "600" }}>
+          Petra Wallet Required
+        </p>
         <a 
           href="https://petra.app/" 
           target="_blank" 
           rel="noreferrer"
           style={{
-            color: "#3b82f6",
-            textDecoration: "underline"
+            display: "inline-block",
+            padding: "8px 16px",
+            backgroundColor: "#3b82f6",
+            color: "white",
+            textDecoration: "none",
+            borderRadius: "6px",
+            fontWeight: "500"
           }}
         >
           Install Petra Wallet
         </a>
+        <p style={{ marginTop: "12px", fontSize: "14px", color: "#78716c" }}>
+          After installing, refresh this page
+        </p>
       </div>
     );
   }
@@ -105,29 +141,38 @@ export default function WalletConnect({ setAccount }) {
   return (
     <div style={{ padding: "16px" }}>
       {isConnected ? (
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
           <button 
             style={{
-              padding: "8px 16px",
+              padding: "10px 20px",
               backgroundColor: "#10b981",
               color: "white",
               border: "none",
-              borderRadius: "6px",
-              cursor: "default"
+              borderRadius: "8px",
+              fontWeight: "600",
+              cursor: "default",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px"
             }}
           >
-            Connected ✓
+            <span style={{ fontSize: "18px" }}>✓</span>
+            Connected
           </button>
           <button 
             onClick={disconnectWallet}
             style={{
-              padding: "8px 16px",
+              padding: "10px 20px",
               backgroundColor: "#ef4444",
               color: "white",
               border: "none",
-              borderRadius: "6px",
-              cursor: "pointer"
+              borderRadius: "8px",
+              fontWeight: "600",
+              cursor: "pointer",
+              transition: "background-color 0.2s"
             }}
+            onMouseEnter={(e) => e.target.style.backgroundColor = "#dc2626"}
+            onMouseLeave={(e) => e.target.style.backgroundColor = "#ef4444"}
           >
             Disconnect
           </button>
@@ -136,13 +181,17 @@ export default function WalletConnect({ setAccount }) {
         <button 
           onClick={connectWallet}
           style={{
-            padding: "8px 16px",
+            padding: "10px 20px",
             backgroundColor: "#3b82f6",
             color: "white",
             border: "none",
-            borderRadius: "6px",
-            cursor: "pointer"
+            borderRadius: "8px",
+            fontWeight: "600",
+            cursor: "pointer",
+            transition: "background-color 0.2s"
           }}
+          onMouseEnter={(e) => e.target.style.backgroundColor = "#2563eb"}
+          onMouseLeave={(e) => e.target.style.backgroundColor = "#3b82f6"}
         >
           Connect Wallet
         </button>
